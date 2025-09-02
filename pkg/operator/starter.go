@@ -8,6 +8,7 @@ import (
 	openshiftrouteclientset "github.com/openshift/client-go/route/clientset/versioned"
 	operatorconfigclient "github.com/openshift/kueue-operator/pkg/generated/clientset/versioned"
 	operatorclientinformers "github.com/openshift/kueue-operator/pkg/generated/informers/externalversions"
+	"github.com/openshift/kueue-operator/pkg/migrations"
 	"github.com/openshift/kueue-operator/pkg/operator/operatorclient"
 	"github.com/openshift/library-go/pkg/controller/controllercmd"
 	"github.com/openshift/library-go/pkg/operator/loglevel"
@@ -98,6 +99,10 @@ func RunOperator(ctx context.Context, cc *controllercmd.ControllerContext) error
 	operatorConfigInformers.Start(ctx.Done())
 	kubeInformersForNamespaces.Start(ctx.Done())
 	crdInformer.Start(ctx.Done())
+
+	if err := migrations.RunAllMigrations(ctx, cc); err != nil {
+		return err
+	}
 
 	klog.Infof("Starting log level controller")
 	go logLevelController.Run(ctx, 1)
