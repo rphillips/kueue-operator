@@ -137,24 +137,7 @@ var _ = Describe("Hierarchical Cohorts", Label("cohort"), Ordered, func() {
 			checkWorkloadCondition(ctx, env.NSFrontend.Name, string(job2.UID), kueuev1beta2.WorkloadAdmitted, "frontend-job-2")
 
 			By("Verifying cq-frontend borrowed 250m CPU")
-			Eventually(func() error {
-				cq, err := clients.UpstreamKueueClient.KueueV1beta2().ClusterQueues().Get(ctx, env.CQFrontend.Name, metav1.GetOptions{})
-				if err != nil {
-					return err
-				}
-				for _, flavorUsage := range cq.Status.FlavorsUsage {
-					for _, resourceUsage := range flavorUsage.Resources {
-						if resourceUsage.Name == corev1.ResourceCPU {
-							expectedBorrowed := resource.MustParse("250m")
-							if resourceUsage.Borrowed.Cmp(expectedBorrowed) == 0 {
-								return nil
-							}
-							return fmt.Errorf("expected borrowed CPU to be 250m, got %s", resourceUsage.Borrowed.String())
-						}
-					}
-				}
-				return fmt.Errorf("CPU resource not found in clusterQueue status")
-			}, 3*time.Minute, 2*time.Second).Should(Succeed(), "cq-frontend should have borrowed 250m CPU")
+			verifyBorrowedCPU(ctx, env.CQFrontend.Name, "250m")
 
 			By("Verifying fairSharing status is NOT populated in Classical mode")
 			cqStatus, err := clients.UpstreamKueueClient.KueueV1beta2().ClusterQueues().Get(ctx, env.CQFrontend.Name, metav1.GetOptions{})
@@ -229,28 +212,8 @@ var _ = Describe("Hierarchical Cohorts", Label("cohort"), Ordered, func() {
 			checkWorkloadCondition(ctx, env.NSFrontend.Name, string(job1.UID), kueuev1beta2.WorkloadAdmitted, "frontend-job-1")
 			checkWorkloadCondition(ctx, env.NSFrontend.Name, string(job2.UID), kueuev1beta2.WorkloadAdmitted, "frontend-job-2")
 
-			By("Verifying cq-frontend borrowed 250m CPU and has weightedShare populated")
-			Eventually(func() error {
-				cq, err := clients.UpstreamKueueClient.KueueV1beta2().ClusterQueues().Get(ctx, env.CQFrontend.Name, metav1.GetOptions{})
-				if err != nil {
-					return err
-				}
-				if cq.Status.FairSharing == nil {
-					return fmt.Errorf("fairSharing status not populated on cq-frontend")
-				}
-				for _, flavorUsage := range cq.Status.FlavorsUsage {
-					for _, resourceUsage := range flavorUsage.Resources {
-						if resourceUsage.Name == corev1.ResourceCPU {
-							expectedBorrowed := resource.MustParse("250m")
-							if resourceUsage.Borrowed.Cmp(expectedBorrowed) == 0 {
-								return nil
-							}
-							return fmt.Errorf("expected borrowed CPU to be 250m, got %s", resourceUsage.Borrowed.String())
-						}
-					}
-				}
-				return fmt.Errorf("CPU resource not found in clusterQueue status")
-			}, 3*time.Minute, 2*time.Second).Should(Succeed(), "cq-frontend should have borrowed 250m and have fairSharing status")
+			By("Verifying cq-frontend borrowed 250m CPU")
+			verifyBorrowedCPU(ctx, env.CQFrontend.Name, "250m")
 
 			By("Verifying cq-frontend weightedShare reflects borrowing (weight:3, using 500m)")
 			cqFrontendStatus, err := clients.UpstreamKueueClient.KueueV1beta2().ClusterQueues().Get(ctx, env.CQFrontend.Name, metav1.GetOptions{})
@@ -301,18 +264,7 @@ var _ = Describe("Hierarchical Cohorts", Label("cohort"), Ordered, func() {
 				"cq-frontend should still have 2 admitted workloads")
 
 			By("Verifying cq-frontend is still borrowing 250m CPU")
-			foundCPU := false
-			for _, flavorUsage := range cqFrontendFinal.Status.FlavorsUsage {
-				for _, resourceUsage := range flavorUsage.Resources {
-					if resourceUsage.Name == corev1.ResourceCPU {
-						foundCPU = true
-						expectedBorrowed := resource.MustParse("250m")
-						Expect(resourceUsage.Borrowed.Cmp(expectedBorrowed)).To(Equal(0),
-							"cq-frontend should still be borrowing 250m CPU")
-					}
-				}
-			}
-			Expect(foundCPU).To(BeTrue(), "CPU resource not found in clusterQueue status")
+			verifyBorrowedCPU(ctx, env.CQFrontend.Name, "250m")
 		})
 	})
 
@@ -515,4 +467,28 @@ func setupCohortTestEnv(ctx context.Context,
 	env.LQML = lqML
 
 	return env
+}
+
+// verifyBorrowedCPU asserts that the named ClusterQueue has borrowed exactly
+// the given amount of CPU (e.g. "250m"). Reused across D1, D2, and the
+// preemption test to avoid duplicating the FlavorsUsage walk.
+func verifyBorrowedCPU(ctx context.Context, clusterQueueName, expectedCPU string) {
+	expected := resource.MustParse(expectedCPU)
+	Eventually(func() error {
+		cq, err := clients.UpstreamKueueClient.KueueV1beta2().ClusterQueues().Get(ctx, clusterQueueName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		for _, flavorUsage := range cq.Status.FlavorsUsage {
+			for _, resourceUsage := range flavorUsage.Resources {
+				if resourceUsage.Name == corev1.ResourceCPU {
+					if resourceUsage.Borrowed.Cmp(expected) == 0 {
+						return nil
+					}
+					return fmt.Errorf("expected borrowed CPU to be %s, got %s", expectedCPU, resourceUsage.Borrowed.String())
+				}
+			}
+		}
+		return fmt.Errorf("CPU resource not found in clusterQueue %s status", clusterQueueName)
+	}, 3*time.Minute, 2*time.Second).Should(Succeed(), "%s should have borrowed %s CPU", clusterQueueName, expectedCPU)
 }

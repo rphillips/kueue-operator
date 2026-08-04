@@ -26,7 +26,6 @@ import (
 	"github.com/openshift/kueue-operator/test/e2e/testutils"
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kueuev1beta2 "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 )
@@ -131,24 +130,7 @@ var _ = Describe("Preemption", Label("preemption"), Ordered, func() {
 			checkWorkloadCondition(ctx, namespaceA.Name, string(borrowingJob.UID), kueuev1beta2.WorkloadAdmitted, "borrowing")
 
 			By("Verifying clusterQueueA borrowed 250m CPU")
-			Eventually(func() error {
-				cq, err := clients.UpstreamKueueClient.KueueV1beta2().ClusterQueues().Get(ctx, clusterQueueA.Name, metav1.GetOptions{})
-				if err != nil {
-					return err
-				}
-				for _, flavorUsage := range cq.Status.FlavorsUsage {
-					for _, resourceUsage := range flavorUsage.Resources {
-						if resourceUsage.Name == corev1.ResourceCPU {
-							expectedBorrowed := resource.MustParse("250m")
-							if resourceUsage.Borrowed.Cmp(expectedBorrowed) == 0 {
-								return nil
-							}
-							return fmt.Errorf("expected borrowed CPU to be 250m, got %s", resourceUsage.Borrowed.String())
-						}
-					}
-				}
-				return fmt.Errorf("CPU resource not found in clusterQueue status")
-			}, testutils.OperatorReadyTime, testutils.OperatorPoll).Should(Succeed(), "clusterQueueA should have borrowed 250m CPU")
+			verifyBorrowedCPU(ctx, clusterQueueA.Name, "250m")
 
 			By("Creating a job on B that will reclaim quota from A")
 			cleanupReclaimJob, reclaimJob, err := createCustomJob(ctx, "reclaim-job", namespaceB.Name, localQueueB.Name, "", "250m", "128Mi")
