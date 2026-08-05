@@ -490,6 +490,87 @@ func (tw *TopologyWrapper) CreateWithObject(ctx context.Context, client *upstrea
 	return createdTopology, cleanup, nil
 }
 
+// CohortWrapper wraps a Cohort and provides builder methods.
+type CohortWrapper struct {
+	*kueuev1beta2.Cohort
+}
+
+// NewCohort creates a new wrapper with default values.
+func NewCohort() *CohortWrapper {
+	c := &kueuev1beta2.Cohort{
+		ObjectMeta: v1.ObjectMeta{
+			Name: "test-cohort",
+		},
+		Spec: kueuev1beta2.CohortSpec{},
+	}
+	return &CohortWrapper{Cohort: c}
+}
+
+// WithGenerateName switches to using GenerateName with "cohort-" prefix.
+func (cw *CohortWrapper) WithGenerateName() *CohortWrapper {
+	cw.Name = ""
+	cw.GenerateName = "cohort-"
+	return cw
+}
+
+// WithParentName sets the parent Cohort reference for hierarchical Cohort trees.
+func (cw *CohortWrapper) WithParentName(parent string) *CohortWrapper {
+	cw.Spec.ParentName = kueuev1beta2.CohortReference(parent)
+	return cw
+}
+
+// WithResourceGroups sets the resource groups on the Cohort.
+func (cw *CohortWrapper) WithResourceGroups(rgs []kueuev1beta2.ResourceGroup) *CohortWrapper {
+	cw.Spec.ResourceGroups = rgs
+	return cw
+}
+
+// WithFairSharingWeight sets the FairSharing weight for the Cohort.
+func (cw *CohortWrapper) WithFairSharingWeight(weight string) *CohortWrapper {
+	w := resource.MustParse(weight)
+	cw.Spec.FairSharing = &kueuev1beta2.FairSharing{
+		Weight: &w,
+	}
+	return cw
+}
+
+// Create creates the Cohort in the cluster and returns a cleanup function.
+func (cw *CohortWrapper) Create(ctx context.Context, client *upstreamkueueclient.Clientset) (func(), error) {
+	_, cleanup, err := cw.CreateWithObject(ctx, client)
+	return cleanup, err
+}
+
+// CreateWithObject creates the Cohort in the cluster and returns the created object, cleanup function, and error.
+func (cw *CohortWrapper) CreateWithObject(ctx context.Context, client *upstreamkueueclient.Clientset) (*kueuev1beta2.Cohort, func(), error) {
+	createdCohort, err := client.KueueV1beta2().Cohorts().Create(ctx, cw.Cohort, v1.CreateOptions{})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cleanup := func() {
+		ctx := context.TODO()
+		By(fmt.Sprintf("Destroying Cohort %s", createdCohort.Name))
+		removeFinalizersWithPatch(func() error {
+			_, err := client.KueueV1beta2().Cohorts().Patch(ctx, createdCohort.Name, types.MergePatchType, removeFinalizersMergePatch, metav1.PatchOptions{})
+			return err
+		})
+		err := client.KueueV1beta2().Cohorts().Delete(ctx, createdCohort.Name, metav1.DeleteOptions{})
+		if apierrors.IsNotFound(err) {
+			return
+		}
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() error {
+			_, err := client.KueueV1beta2().Cohorts().Get(ctx, createdCohort.Name, metav1.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			return fmt.Errorf("cohort %s still exists: %w", createdCohort.Name, err)
+		}, DeletionTime, DeletionPoll).Should(Succeed(), fmt.Sprintf("Cohort %s was not cleaned up", createdCohort.Name))
+	}
+
+	return createdCohort, cleanup, nil
+}
+
 type KueueWrapper struct {
 	*ssv1.Kueue
 }
@@ -946,6 +1027,27 @@ func IsPodScheduled(ctx context.Context, kubeClient *kubernetes.Clientset, names
 		}
 	}
 	return false
+}
+
+// CheckBorrowedCPU polls the ClusterQueue status until the borrowed CPU meets the minimum threshold.
+func CheckBorrowedCPU(ctx context.Context, kueueClient *upstreamkueueclient.Clientset, cqName, minBorrowed, description string) {
+	Eventually(func() error {
+		fetchedCQ, err := kueueClient.KueueV1beta2().ClusterQueues().Get(ctx, cqName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		for _, flavorUsage := range fetchedCQ.Status.FlavorsUsage {
+			for _, resourceUsage := range flavorUsage.Resources {
+				if resourceUsage.Name == corev1.ResourceCPU {
+					if resourceUsage.Borrowed.Cmp(resource.MustParse(minBorrowed)) >= 0 {
+						return nil
+					}
+					return fmt.Errorf("expected borrowed CPU >= %s, got %s", minBorrowed, resourceUsage.Borrowed.String())
+				}
+			}
+		}
+		return fmt.Errorf("CPU resource not found in ClusterQueue status")
+	}, OperatorReadyTime, OperatorPoll).Should(Succeed(), description)
 }
 
 // IsJobPodRunning returns true if at least one pod owned by the job is in Running phase.
