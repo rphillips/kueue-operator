@@ -14,3 +14,5 @@ LABEL io.k8s.display-name="OpenShift Kueue Operator based on RHEL 9" \
       io.openshift.tags="openshift,kueue-operator" \
       com.redhat.delivery.appregistry=true \
       maintainer="AOS Node team, <aos-node@redhat.com>"
+
+USER 1001
