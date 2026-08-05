@@ -18,3 +18,7 @@ implement d4 and d5
 implement d6 d7 and d8
 
 reread CLAUDE.md and make sure we are following it
+
+refactor the flavorsusage and resouceCPU usage to one reusable function
+
+do other test files use this functionality?

@@ -136,23 +136,7 @@ var _ = Describe("Cohort", Label("operator", "cohort"), Ordered, func() {
 		checkWorkloadCondition(ctx, ns.Name, string(createdJob.UID), kueuev1beta2.WorkloadAdmitted, "cohort-borrow")
 
 		By("Verifying the ClusterQueue shows borrowed resources")
-		Eventually(func() error {
-			fetchedCQ, err := clients.UpstreamKueueClient.KueueV1beta2().ClusterQueues().Get(ctx, cq.Name, metav1.GetOptions{})
-			if err != nil {
-				return err
-			}
-			for _, flavorUsage := range fetchedCQ.Status.FlavorsUsage {
-				for _, resourceUsage := range flavorUsage.Resources {
-					if resourceUsage.Name == corev1.ResourceCPU {
-						if resourceUsage.Borrowed.Cmp(resource.MustParse("250m")) >= 0 {
-							return nil
-						}
-						return fmt.Errorf("expected borrowed CPU >= 250m, got %s", resourceUsage.Borrowed.String())
-					}
-				}
-			}
-			return fmt.Errorf("CPU resource not found in ClusterQueue status")
-		}, testutils.OperatorReadyTime, testutils.OperatorPoll).Should(Succeed(), "ClusterQueue should show borrowed CPU from Cohort")
+		testutils.CheckBorrowedCPU(ctx, clients.UpstreamKueueClient, cq.Name, "250m", "ClusterQueue should show borrowed CPU from Cohort")
 	})
 
 	It("should allow a child Cohort ClusterQueue to borrow from parent Cohort", Label("D4"), func(ctx context.Context) {
@@ -230,23 +214,7 @@ var _ = Describe("Cohort", Label("operator", "cohort"), Ordered, func() {
 		checkWorkloadCondition(ctx, ns.Name, string(createdJob.UID), kueuev1beta2.WorkloadAdmitted, "hierarchical-borrow")
 
 		By("Verifying the ClusterQueue shows borrowed resources")
-		Eventually(func() error {
-			fetchedCQ, err := clients.UpstreamKueueClient.KueueV1beta2().ClusterQueues().Get(ctx, cq.Name, metav1.GetOptions{})
-			if err != nil {
-				return err
-			}
-			for _, flavorUsage := range fetchedCQ.Status.FlavorsUsage {
-				for _, resourceUsage := range flavorUsage.Resources {
-					if resourceUsage.Name == corev1.ResourceCPU {
-						if resourceUsage.Borrowed.Cmp(resource.MustParse("500m")) >= 0 {
-							return nil
-						}
-						return fmt.Errorf("expected borrowed CPU >= 500m, got %s", resourceUsage.Borrowed.String())
-					}
-				}
-			}
-			return fmt.Errorf("CPU resource not found in ClusterQueue status")
-		}, testutils.OperatorReadyTime, testutils.OperatorPoll).Should(Succeed(), "ClusterQueue should show borrowed CPU from parent Cohort")
+		testutils.CheckBorrowedCPU(ctx, clients.UpstreamKueueClient, cq.Name, "500m", "ClusterQueue should show borrowed CPU from parent Cohort")
 	})
 
 	It("should enforce BorrowingLimit on Cohort resourceGroups", Label("D5"), func(ctx context.Context) {

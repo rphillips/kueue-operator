@@ -1028,6 +1028,27 @@ func IsPodScheduled(ctx context.Context, kubeClient *kubernetes.Clientset, names
 	return false
 }
 
+// CheckBorrowedCPU polls the ClusterQueue status until the borrowed CPU meets the minimum threshold.
+func CheckBorrowedCPU(ctx context.Context, kueueClient *upstreamkueueclient.Clientset, cqName, minBorrowed, description string) {
+	Eventually(func() error {
+		fetchedCQ, err := kueueClient.KueueV1beta2().ClusterQueues().Get(ctx, cqName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		for _, flavorUsage := range fetchedCQ.Status.FlavorsUsage {
+			for _, resourceUsage := range flavorUsage.Resources {
+				if resourceUsage.Name == corev1.ResourceCPU {
+					if resourceUsage.Borrowed.Cmp(resource.MustParse(minBorrowed)) >= 0 {
+						return nil
+					}
+					return fmt.Errorf("expected borrowed CPU >= %s, got %s", minBorrowed, resourceUsage.Borrowed.String())
+				}
+			}
+		}
+		return fmt.Errorf("CPU resource not found in ClusterQueue status")
+	}, OperatorReadyTime, OperatorPoll).Should(Succeed(), description)
+}
+
 // IsJobPodRunning returns true if at least one pod owned by the job is in Running phase.
 func IsJobPodRunning(ctx context.Context, kubeClient *kubernetes.Clientset, namespace, jobName string) bool {
 	pods, err := kubeClient.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
