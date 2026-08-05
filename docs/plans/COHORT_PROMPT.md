@@ -8,3 +8,9 @@ read the docs/plans/COHORT_PLAN.md
 implement the CohortWrapper
 
 make sure to use the context passed into createwithoject in the cleanup function
+
+what would you implement next
+
+implement d2 and d3
+
+
