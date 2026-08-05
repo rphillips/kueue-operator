@@ -14,3 +14,7 @@ what would you implement next
 implement d2 and d3
 
 implement d4 and d5
+
+implement d6 d7 and d8
+
+reread CLAUDE.md and make sure we are following it
